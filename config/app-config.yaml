@@ -1,0 +1,58 @@
+discovery:
+  interval: 300               # 发现间隔(秒)
+  batch_size: 100             # 批处理大小
+  max_retries: 3              # 最大重试次数
+  timeout: 30                 # 超时时间(秒)
+
+download:
+  timeout: 30                 # 下载超时(秒)
+  retry_count: 3              # 重试次数
+  concurrent_limit: 5         # 并发数
+  delay_between_requests: 2   # 请求间隔(秒)
+  user_agent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+  headers:
+    Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8"
+    Accept-Language: "zh-CN,zh;q=0.8,en-US;q=0.5,en;q=0.3"
+    Accept-Encoding: "gzip, deflate"
+    Connection: "keep-alive"
+
+parser:
+  batch_size: 10              # 解析批大小
+  max_content_length: 1000000 # 最大内容长度
+  extract_images: false       # 是否提取图片
+  content_selectors:
+    - "#js_content"           # 微信文章内容选择器
+    - ".rich_media_content"   # 备用选择器
+    - "article"               # 通用文章选择器
+  remove_elements:
+    - "script"
+    - "style"
+    - ".qr_code"
+    - ".reward"
+
+storage:
+  cleanup_temp_files: true    # 清理临时文件
+  compress_old_files: false   # 压缩旧文件
+  file_structure: "date"      # 文件组织方式: date/source
+  keep_html: true             # 保留原始HTML
+
+web:
+  title: "Genesis Connector 内容处理系统"
+  items_per_page: 50
+  theme: "bootstrap"
+  features:
+    dashboard: true
+    statistics: true
+    file_browser: true
+    manual_process: true
+
+logging:
+  level: INFO
+  format: "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+  max_file_size: "10MB"
+  backup_count: 5
+  loggers:
+    discovery: INFO
+    download: INFO
+    parser: INFO
+    web: INFO
