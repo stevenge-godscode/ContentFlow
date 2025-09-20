@@ -112,12 +112,12 @@ def print_network_section():
     print("-" * 50)
     print("🌐 外部访问:")
     print("   • WeWe RSS Web: http://localhost:4000")
-    print("   • MySQL数据库: localhost:3306")
     print("")
     print("🔒 内部服务 (Docker网络内部):")
     print("   • Download Service 1: content-download-1:5003")
     print("   • Download Service 2: content-download-2:5004")
     print("   • Text Extraction: content-parser:5006")
+    print("   • MySQL Database: mysql:3306")
     print("   • Redis: redis:6379")
     print("   • PostgreSQL: postgres:5432")
 

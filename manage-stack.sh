@@ -11,7 +11,7 @@ case "$1" in
 
         # Start databases with original data
         echo "📦 Starting databases..."
-        docker run -d --name mysql --network genesis-complete-network -p 3306:3306 \
+        docker run -d --name mysql --network genesis-complete-network \
           -e MYSQL_ROOT_PASSWORD=123456 -e TZ='Asia/Shanghai' -e MYSQL_DATABASE='wewe-rss' \
           -v af2387f83fdb6104ac54efc9e7b62a9ac27cced340a32250d00100b7094cd0d7:/var/lib/mysql \
           --restart unless-stopped \
