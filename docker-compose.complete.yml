@@ -1,11 +1,11 @@
 version: '3.8'
 
 services:
-  # 原有的WeWe RSS系统
+  # WeWe RSS - 保留web接口的外部访问
   wewe-rss:
     image: cooderl/wewe-rss:latest
     ports:
-      - "4000:4000"
+      - "4000:4000"  # 保留Web界面访问
     environment:
       - DATABASE_URL=mysql://root:123456@mysql:3306/wewe-rss?schema=public
       - AUTH_CODE=123567
@@ -16,7 +16,7 @@ services:
       - genesis-network
     restart: unless-stopped
 
-  # 原有的MySQL数据库
+  # MySQL数据库 - 完全内部
   mysql:
     image: mysql:8.3.0
     command: --mysql-native-password=ON
@@ -25,9 +25,10 @@ services:
       TZ: 'Asia/Shanghai'
       MYSQL_DATABASE: 'wewe-rss'
     volumes:
-      - mysql_data:/var/lib/mysql
-    ports:
-      - "3306:3306"
+      - db_data:/var/lib/mysql
+    # 移除外部端口映射
+    expose:
+      - "3306"
     healthcheck:
       test: ['CMD', 'mysqladmin', 'ping', '-h', 'localhost']
       timeout: 45s
@@ -37,36 +38,14 @@ services:
       - genesis-network
     restart: unless-stopped
 
-  # 内容发现服务
-  content-discovery:
-    build:
-      context: ./services/discovery
-      dockerfile: Dockerfile
-    environment:
-      - WEWE_RSS_URL=http://wewe-rss:4000
-      - REDIS_URL=redis://redis:6379
-      - POSTGRES_URL=postgresql://user:password@postgres:5432/content_db
-      - DISCOVERY_INTERVAL=300
-      - LOG_LEVEL=INFO
-    volumes:
-      - ./data:/app/data
-      - ./config:/app/config:ro
-    depends_on:
-      - wewe-rss
-      - redis
-      - postgres
-    networks:
-      - genesis-network
-    restart: unless-stopped
-
-  # 下载服务 (使用根目录的服务脚本)
+  # 下载服务 1 (完全内部)
   content-download-1:
     image: genesis-download
     build:
       context: .
       dockerfile: Dockerfile.download
-    ports:
-      - "5003:5003"
+    expose:
+      - "5003"
     environment:
       - REDIS_URL=redis://redis:6379
       - POSTGRES_URL=postgresql://user:password@postgres:5432/content_db
@@ -88,14 +67,14 @@ services:
       timeout: 10s
       retries: 3
 
-  # 下载服务副本
+  # 下载服务 2 (完全内部)
   content-download-2:
     image: genesis-download
     build:
       context: .
       dockerfile: Dockerfile.download
-    ports:
-      - "5004:5004"
+    expose:
+      - "5004"
     environment:
       - REDIS_URL=redis://redis:6379
       - POSTGRES_URL=postgresql://user:password@postgres:5432/content_db
@@ -117,14 +96,14 @@ services:
       timeout: 10s
       retries: 3
 
-  # 文本提取服务 (使用根目录的服务脚本)
+  # 文本提取服务 (完全内部)
   content-parser:
     image: genesis-extraction
     build:
       context: .
       dockerfile: Dockerfile.extraction
-    ports:
-      - "5006:5006"
+    expose:
+      - "5006"
     environment:
       - REDIS_URL=redis://redis:6379
       - POSTGRES_URL=postgresql://user:password@postgres:5432/content_db
@@ -144,37 +123,14 @@ services:
       timeout: 10s
       retries: 3
 
-  # 管理界面
-  content-web:
-    build:
-      context: ./services/web
-      dockerfile: Dockerfile
-    ports:
-      - "8080:5000"
-    environment:
-      - POSTGRES_URL=postgresql://user:password@postgres:5432/content_db
-      - WEWE_RSS_URL=http://wewe-rss:4000
-      - AUTH_SECRET_KEY=your-secret-key-here
-      - LOG_LEVEL=INFO
-    volumes:
-      - ./data:/app/data
-      - ./config:/app/config:ro
-    depends_on:
-      - postgres
-      - wewe-rss
-    networks:
-      - genesis-network
-    restart: unless-stopped
-
-  # Redis (队列+缓存)
+  # Redis (完全内部)
   redis:
     image: redis:7-alpine
-    ports:
-      - "6379:6379"
+    expose:
+      - "6379"
     volumes:
       - redis_data:/data
-      - ./config/redis.conf:/etc/redis/redis.conf:ro
-    command: redis-server /etc/redis/redis.conf
+    command: redis-server --save 60 1 --loglevel warning
     networks:
       - genesis-network
     restart: unless-stopped
@@ -184,7 +140,7 @@ services:
       timeout: 10s
       retries: 3
 
-  # PostgreSQL (内容处理状态数据库)
+  # PostgreSQL (完全内部)
   postgres:
     image: postgres:15-alpine
     environment:
@@ -192,8 +148,8 @@ services:
       - POSTGRES_USER=user
       - POSTGRES_PASSWORD=password
       - POSTGRES_INITDB_ARGS=--encoding=UTF-8 --lc-collate=C --lc-ctype=C
-    ports:
-      - "5433:5432"
+    expose:
+      - "5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
       - ./sql/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
@@ -206,31 +162,52 @@ services:
       timeout: 10s
       retries: 3
 
-  # Nginx (静态文件服务)
-  nginx:
-    image: nginx:alpine
-    ports:
-      - "8081:80"
-    volumes:
-      - ./data/content:/usr/share/nginx/html/content:ro
-      - ./config/nginx.conf:/etc/nginx/nginx.conf:ro
+  # 系统监控 (内部健康检查)
+  monitoring:
+    image: alpine/curl
+    command: |
+      sh -c "
+        while true; do
+          echo '=== Full Stack Health Check ==='
+          echo 'WeWe RSS:'
+          curl -s -o /dev/null -w '%{http_code}' http://wewe-rss:4000 || echo 'Service down'
+          echo ''
+          echo 'Download Service 1:'
+          curl -s http://content-download-1:5003/health | head -c 100 || echo 'Service down'
+          echo ''
+          echo 'Download Service 2:'
+          curl -s http://content-download-2:5004/health | head -c 100 || echo 'Service down'
+          echo ''
+          echo 'Text Extraction:'
+          curl -s http://content-parser:5006/health | head -c 100 || echo 'Service down'
+          echo ''
+          echo '================================'
+          sleep 300
+        done
+      "
+    depends_on:
+      - wewe-rss
+      - content-download-1
+      - content-download-2
+      - content-parser
     networks:
       - genesis-network
     restart: unless-stopped
-    depends_on:
-      - content-web
 
 networks:
   genesis-network:
     driver: bridge
-    name: genesis-network
+    name: genesis-complete-network
 
 volumes:
-  mysql_data:
-    name: genesis_mysql_data
+  db_data:
+    external: true
+    name: af2387f83fdb6104ac54efc9e7b62a9ac27cced340a32250d00100b7094cd0d7
   redis_data:
-    name: genesis_redis_data
+    external: true
+    name: 71b038910c1ac45f9b38e50dac5cb5e1c03cb92672358545c980949956e5658e
   postgres_data:
-    name: genesis_postgres_data
+    external: true
+    name: af0339824b9f09e11313c105d2991e1b069fcd7bc50fdb4b8570fe179a4c1d45
   genesis_content:
     name: genesis_content_data

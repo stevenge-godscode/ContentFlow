@@ -87,7 +87,23 @@ class WeWeRSSClient:
                     response = self.session.get(url, params=params, timeout=self.timeout)
 
                     if response.status_code == 200:
-                        articles = response.json()
+                        data = response.json()
+
+                        # 处理不同的返回格式
+                        articles = []
+                        if isinstance(data, list):
+                            articles = data
+                        elif isinstance(data, dict):
+                            # 检查是否是JSON Feed格式
+                            if 'items' in data and isinstance(data['items'], list):
+                                articles = data['items']
+                            elif 'articles' in data and isinstance(data['articles'], list):
+                                articles = data['articles']
+                            else:
+                                # 如果是单个feed信息，返回空列表
+                                logger.debug(f"No articles found in feed data structure for {feed_id}")
+                                articles = []
+
                         logger.info(f"Retrieved {len(articles)} articles from feed {feed_id}")
                         return articles
                     elif response.status_code == 404:
@@ -173,6 +189,82 @@ class WeWeRSSClient:
         except Exception as e:
             logger.error(f"Error fetching article {article_id}: {e}")
             return None
+
+    def trigger_feed_update(self, feed_id: str) -> bool:
+        """触发单个公众号更新"""
+        try:
+            # 尝试不同的更新API端点
+            update_endpoints = [
+                f"/feeds/{feed_id}/update",
+                f"/api/feeds/{feed_id}/update",
+                f"/sync/{feed_id}",
+                f"/api/sync/{feed_id}",
+                f"/feeds/{feed_id}/sync"
+            ]
+
+            for endpoint in update_endpoints:
+                try:
+                    url = f"{self.base_url}{endpoint}"
+                    logger.debug(f"Trying update endpoint: {url}")
+
+                    # 尝试POST请求
+                    response = self.session.post(url, timeout=self.timeout)
+
+                    if response.status_code in [200, 201, 202]:
+                        logger.info(f"Successfully triggered update for feed {feed_id}")
+                        return True
+                    elif response.status_code == 404:
+                        continue
+                    else:
+                        logger.debug(f"Update endpoint {endpoint} returned {response.status_code}")
+                        continue
+
+                except requests.exceptions.RequestException as e:
+                    logger.debug(f"Update endpoint {endpoint} failed: {e}")
+                    continue
+
+            logger.warning(f"No valid update endpoint found for feed {feed_id}")
+            return False
+
+        except Exception as e:
+            logger.error(f"Error triggering update for feed {feed_id}: {e}")
+            return False
+
+    def get_feed_info(self, feed_id: str) -> Optional[Dict]:
+        """获取单个公众号信息"""
+        try:
+            url = f"{self.base_url}/feeds/{feed_id}.json"
+            response = self.session.get(url, timeout=self.timeout)
+
+            if response.status_code == 200:
+                feed_data = response.json()
+                logger.info(f"Retrieved info for feed {feed_id}: {feed_data.get('title', 'Unknown')}")
+                return feed_data
+            else:
+                logger.warning(f"Feed {feed_id} not found or error: {response.status_code}")
+                return None
+
+        except Exception as e:
+            logger.error(f"Error fetching feed info {feed_id}: {e}")
+            return None
+
+    def get_feed_list(self) -> List[Dict]:
+        """获取所有公众号列表"""
+        try:
+            url = f"{self.base_url}/feeds"
+            response = self.session.get(url, timeout=self.timeout)
+
+            if response.status_code == 200:
+                feeds = response.json()
+                logger.info(f"Retrieved {len(feeds)} feeds")
+                return feeds
+            else:
+                logger.warning(f"Feeds list error: {response.status_code}")
+                return []
+
+        except Exception as e:
+            logger.error(f"Error fetching feeds list: {e}")
+            return []
 
     def extract_article_info(self, article: Dict) -> Dict:
         """从WeWe RSS文章数据中提取标准化信息"""

@@ -1,76 +1,19 @@
 version: '3.8'
 
 services:
-  # 原有的WeWe RSS系统
-  wewe-rss:
-    image: cooderl/wewe-rss:latest
-    ports:
-      - "4000:4000"
-    environment:
-      - DATABASE_URL=mysql://root:123456@mysql:3306/wewe-rss?schema=public
-      - AUTH_CODE=123567
-    depends_on:
-      mysql:
-        condition: service_healthy
-    networks:
-      - genesis-network
-    restart: unless-stopped
-
-  # 原有的MySQL数据库
-  mysql:
-    image: mysql:8.3.0
-    command: --mysql-native-password=ON
-    environment:
-      MYSQL_ROOT_PASSWORD: 123456
-      TZ: 'Asia/Shanghai'
-      MYSQL_DATABASE: 'wewe-rss'
-    volumes:
-      - mysql_data:/var/lib/mysql
-    ports:
-      - "3306:3306"
-    healthcheck:
-      test: ['CMD', 'mysqladmin', 'ping', '-h', 'localhost']
-      timeout: 45s
-      interval: 10s
-      retries: 10
-    networks:
-      - genesis-network
-    restart: unless-stopped
-
-  # 内容发现服务
-  content-discovery:
-    build:
-      context: ./services/discovery
-      dockerfile: Dockerfile
-    environment:
-      - WEWE_RSS_URL=http://wewe-rss:4000
-      - REDIS_URL=redis://redis:6379
-      - POSTGRES_URL=postgresql://user:password@postgres:5432/content_db
-      - DISCOVERY_INTERVAL=300
-      - LOG_LEVEL=INFO
-    volumes:
-      - ./data:/app/data
-      - ./config:/app/config:ro
-    depends_on:
-      - wewe-rss
-      - redis
-      - postgres
-    networks:
-      - genesis-network
-    restart: unless-stopped
-
-  # 下载服务 (使用根目录的服务脚本)
+  # 下载服务 1 (无外部端口)
   content-download-1:
     image: genesis-download
     build:
       context: .
       dockerfile: Dockerfile.download
-    ports:
-      - "5003:5003"
+    # 移除所有外部端口映射
+    expose:
+      - "5003"
     environment:
       - REDIS_URL=redis://redis:6379
       - POSTGRES_URL=postgresql://user:password@postgres:5432/content_db
-      - WEWE_RSS_URL=http://wewe-rss:4000
+      - WEWE_RSS_URL=http://host.docker.internal:4000
       - SERVICE_PORT=5003
       - LOG_LEVEL=INFO
     volumes:
@@ -78,7 +21,6 @@ services:
     depends_on:
       - redis
       - postgres
-      - wewe-rss
     networks:
       - genesis-network
     restart: unless-stopped
@@ -88,18 +30,19 @@ services:
       timeout: 10s
       retries: 3
 
-  # 下载服务副本
+  # 下载服务 2 (无外部端口)
   content-download-2:
     image: genesis-download
     build:
       context: .
       dockerfile: Dockerfile.download
-    ports:
-      - "5004:5004"
+    # 移除所有外部端口映射
+    expose:
+      - "5004"
     environment:
       - REDIS_URL=redis://redis:6379
       - POSTGRES_URL=postgresql://user:password@postgres:5432/content_db
-      - WEWE_RSS_URL=http://wewe-rss:4000
+      - WEWE_RSS_URL=http://host.docker.internal:4000
       - SERVICE_PORT=5004
       - LOG_LEVEL=INFO
     volumes:
@@ -107,7 +50,6 @@ services:
     depends_on:
       - redis
       - postgres
-      - wewe-rss
     networks:
       - genesis-network
     restart: unless-stopped
@@ -117,14 +59,15 @@ services:
       timeout: 10s
       retries: 3
 
-  # 文本提取服务 (使用根目录的服务脚本)
+  # 文本提取服务 (无外部端口)
   content-parser:
     image: genesis-extraction
     build:
       context: .
       dockerfile: Dockerfile.extraction
-    ports:
-      - "5006:5006"
+    # 移除所有外部端口映射
+    expose:
+      - "5006"
     environment:
       - REDIS_URL=redis://redis:6379
       - POSTGRES_URL=postgresql://user:password@postgres:5432/content_db
@@ -144,37 +87,15 @@ services:
       timeout: 10s
       retries: 3
 
-  # 管理界面
-  content-web:
-    build:
-      context: ./services/web
-      dockerfile: Dockerfile
-    ports:
-      - "8080:5000"
-    environment:
-      - POSTGRES_URL=postgresql://user:password@postgres:5432/content_db
-      - WEWE_RSS_URL=http://wewe-rss:4000
-      - AUTH_SECRET_KEY=your-secret-key-here
-      - LOG_LEVEL=INFO
-    volumes:
-      - ./data:/app/data
-      - ./config:/app/config:ro
-    depends_on:
-      - postgres
-      - wewe-rss
-    networks:
-      - genesis-network
-    restart: unless-stopped
-
-  # Redis (队列+缓存)
+  # Redis (队列+缓存) - 仅内部访问
   redis:
     image: redis:7-alpine
-    ports:
-      - "6379:6379"
+    # 移除外部端口映射
+    expose:
+      - "6379"
     volumes:
       - redis_data:/data
-      - ./config/redis.conf:/etc/redis/redis.conf:ro
-    command: redis-server /etc/redis/redis.conf
+    command: redis-server --save 60 1 --loglevel warning
     networks:
       - genesis-network
     restart: unless-stopped
@@ -184,7 +105,7 @@ services:
       timeout: 10s
       retries: 3
 
-  # PostgreSQL (内容处理状态数据库)
+  # PostgreSQL (内容处理状态数据库) - 仅内部访问
   postgres:
     image: postgres:15-alpine
     environment:
@@ -192,8 +113,9 @@ services:
       - POSTGRES_USER=user
       - POSTGRES_PASSWORD=password
       - POSTGRES_INITDB_ARGS=--encoding=UTF-8 --lc-collate=C --lc-ctype=C
-    ports:
-      - "5433:5432"
+    # 移除外部端口映射
+    expose:
+      - "5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
       - ./sql/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
@@ -206,28 +128,39 @@ services:
       timeout: 10s
       retries: 3
 
-  # Nginx (静态文件服务)
-  nginx:
-    image: nginx:alpine
-    ports:
-      - "8081:80"
-    volumes:
-      - ./data/content:/usr/share/nginx/html/content:ro
-      - ./config/nginx.conf:/etc/nginx/nginx.conf:ro
+  # 监控服务 (仅用于内部健康检查)
+  monitoring:
+    image: alpine/curl
+    command: |
+      sh -c "
+        while true; do
+          echo '=== Genesis Health Check ==='
+          echo 'Download Service 1:'
+          curl -s http://content-download-1:5003/health || echo 'Service down'
+          echo 'Download Service 2:'
+          curl -s http://content-download-2:5004/health || echo 'Service down'
+          echo 'Text Extraction:'
+          curl -s http://content-parser:5006/health || echo 'Service down'
+          echo '=========================='
+          sleep 300
+        done
+      "
+    depends_on:
+      - content-download-1
+      - content-download-2
+      - content-parser
     networks:
       - genesis-network
     restart: unless-stopped
-    depends_on:
-      - content-web
 
 networks:
   genesis-network:
     driver: bridge
-    name: genesis-network
+    # 内部网络，不对外暴露
+    internal: false  # 设为true会完全隔离网络，但需要WeWe RSS访问
+    name: genesis-internal-network
 
 volumes:
-  mysql_data:
-    name: genesis_mysql_data
   redis_data:
     name: genesis_redis_data
   postgres_data:

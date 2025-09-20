@@ -8,8 +8,9 @@ if [ "$1" = "--detailed" ] || [ "$1" = "-d" ]; then
     echo "🔍 显示详细状态..."
     python check_detailed_status.py
 else
-    echo "🚀 显示全局状态..."
-    python check_global_status.py
+    echo "🚀 显示Docker容器化状态..."
+    python check_docker_status.py
     echo ""
     echo "💡 使用 ./status --detailed 查看详细的流水线状态"
+    echo "💡 使用 ./manage-stack.sh status 查看原生Docker状态"
 fi

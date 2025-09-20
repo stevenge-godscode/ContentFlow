@@ -13,7 +13,13 @@ import sys
 def get_service_status(url, service_name):
     """获取服务状态"""
     try:
-        response = requests.get(url, timeout=5)
+        # 添加缓存防止头部以确保获取最新数据
+        headers = {
+            'Cache-Control': 'no-cache, no-store, must-revalidate',
+            'Pragma': 'no-cache',
+            'Expires': '0'
+        }
+        response = requests.get(url, timeout=5, headers=headers)
         if response.status_code == 200:
             # 对于WeWe RSS等非JSON服务，只检查HTTP状态
             if 'WeWe RSS' in service_name:

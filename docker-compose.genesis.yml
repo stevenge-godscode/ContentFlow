@@ -1,65 +1,7 @@
 version: '3.8'
 
 services:
-  # 原有的WeWe RSS系统
-  wewe-rss:
-    image: cooderl/wewe-rss:latest
-    ports:
-      - "4000:4000"
-    environment:
-      - DATABASE_URL=mysql://root:123456@mysql:3306/wewe-rss?schema=public
-      - AUTH_CODE=123567
-    depends_on:
-      mysql:
-        condition: service_healthy
-    networks:
-      - genesis-network
-    restart: unless-stopped
-
-  # 原有的MySQL数据库
-  mysql:
-    image: mysql:8.3.0
-    command: --mysql-native-password=ON
-    environment:
-      MYSQL_ROOT_PASSWORD: 123456
-      TZ: 'Asia/Shanghai'
-      MYSQL_DATABASE: 'wewe-rss'
-    volumes:
-      - mysql_data:/var/lib/mysql
-    ports:
-      - "3306:3306"
-    healthcheck:
-      test: ['CMD', 'mysqladmin', 'ping', '-h', 'localhost']
-      timeout: 45s
-      interval: 10s
-      retries: 10
-    networks:
-      - genesis-network
-    restart: unless-stopped
-
-  # 内容发现服务
-  content-discovery:
-    build:
-      context: ./services/discovery
-      dockerfile: Dockerfile
-    environment:
-      - WEWE_RSS_URL=http://wewe-rss:4000
-      - REDIS_URL=redis://redis:6379
-      - POSTGRES_URL=postgresql://user:password@postgres:5432/content_db
-      - DISCOVERY_INTERVAL=300
-      - LOG_LEVEL=INFO
-    volumes:
-      - ./data:/app/data
-      - ./config:/app/config:ro
-    depends_on:
-      - wewe-rss
-      - redis
-      - postgres
-    networks:
-      - genesis-network
-    restart: unless-stopped
-
-  # 下载服务 (使用根目录的服务脚本)
+  # 下载服务 1
   content-download-1:
     image: genesis-download
     build:
@@ -70,15 +12,11 @@ services:
     environment:
       - REDIS_URL=redis://redis:6379
       - POSTGRES_URL=postgresql://user:password@postgres:5432/content_db
-      - WEWE_RSS_URL=http://wewe-rss:4000
+      - WEWE_RSS_URL=http://localhost:4000
       - SERVICE_PORT=5003
       - LOG_LEVEL=INFO
     volumes:
       - genesis_content:/tmp/genesis-content
-    depends_on:
-      - redis
-      - postgres
-      - wewe-rss
     networks:
       - genesis-network
     restart: unless-stopped
@@ -88,7 +26,7 @@ services:
       timeout: 10s
       retries: 3
 
-  # 下载服务副本
+  # 下载服务 2
   content-download-2:
     image: genesis-download
     build:
@@ -99,15 +37,11 @@ services:
     environment:
       - REDIS_URL=redis://redis:6379
       - POSTGRES_URL=postgresql://user:password@postgres:5432/content_db
-      - WEWE_RSS_URL=http://wewe-rss:4000
+      - WEWE_RSS_URL=http://localhost:4000
       - SERVICE_PORT=5004
       - LOG_LEVEL=INFO
     volumes:
       - genesis_content:/tmp/genesis-content
-    depends_on:
-      - redis
-      - postgres
-      - wewe-rss
     networks:
       - genesis-network
     restart: unless-stopped
@@ -117,7 +51,7 @@ services:
       timeout: 10s
       retries: 3
 
-  # 文本提取服务 (使用根目录的服务脚本)
+  # 文本提取服务
   content-parser:
     image: genesis-extraction
     build:
@@ -132,9 +66,6 @@ services:
       - LOG_LEVEL=INFO
     volumes:
       - genesis_content:/tmp/genesis-content
-    depends_on:
-      - redis
-      - postgres
     networks:
       - genesis-network
     restart: unless-stopped
@@ -144,28 +75,6 @@ services:
       timeout: 10s
       retries: 3
 
-  # 管理界面
-  content-web:
-    build:
-      context: ./services/web
-      dockerfile: Dockerfile
-    ports:
-      - "8080:5000"
-    environment:
-      - POSTGRES_URL=postgresql://user:password@postgres:5432/content_db
-      - WEWE_RSS_URL=http://wewe-rss:4000
-      - AUTH_SECRET_KEY=your-secret-key-here
-      - LOG_LEVEL=INFO
-    volumes:
-      - ./data:/app/data
-      - ./config:/app/config:ro
-    depends_on:
-      - postgres
-      - wewe-rss
-    networks:
-      - genesis-network
-    restart: unless-stopped
-
   # Redis (队列+缓存)
   redis:
     image: redis:7-alpine
@@ -173,8 +82,7 @@ services:
       - "6379:6379"
     volumes:
       - redis_data:/data
-      - ./config/redis.conf:/etc/redis/redis.conf:ro
-    command: redis-server /etc/redis/redis.conf
+    command: redis-server --save 60 1 --loglevel warning
     networks:
       - genesis-network
     restart: unless-stopped
@@ -206,28 +114,12 @@ services:
       timeout: 10s
       retries: 3
 
-  # Nginx (静态文件服务)
-  nginx:
-    image: nginx:alpine
-    ports:
-      - "8081:80"
-    volumes:
-      - ./data/content:/usr/share/nginx/html/content:ro
-      - ./config/nginx.conf:/etc/nginx/nginx.conf:ro
-    networks:
-      - genesis-network
-    restart: unless-stopped
-    depends_on:
-      - content-web
-
 networks:
   genesis-network:
     driver: bridge
     name: genesis-network
 
 volumes:
-  mysql_data:
-    name: genesis_mysql_data
   redis_data:
     name: genesis_redis_data
   postgres_data:

@@ -310,6 +310,93 @@ class DiscoveryEngine:
             logger.error(f"Force discovery failed: {e}")
             return {'error': str(e)}
 
+    def run_single_feed_discovery(self, feed_id: str) -> Dict:
+        """对单个公众号执行发现任务"""
+        start_time = time.time()
+        run_stats = {
+            'feed_id': feed_id,
+            'discovered': 0,
+            'new_articles': 0,
+            'duplicates': 0,
+            'errors': 0,
+            'start_time': datetime.utcnow().isoformat(),
+            'duration': 0,
+            'update_triggered': False
+        }
+
+        logger.info(f"Starting single feed discovery for: {feed_id}")
+
+        try:
+            # 1. 健康检查
+            if not self._health_check():
+                raise Exception("Health check failed")
+
+            # 2. 尝试触发单个公众号更新
+            update_success = self.wewe_client.trigger_feed_update(feed_id)
+            run_stats['update_triggered'] = update_success
+
+            if update_success:
+                logger.info(f"Successfully triggered update for feed {feed_id}")
+                # 等待一段时间让WeWe RSS处理更新
+                time.sleep(5)
+            else:
+                logger.warning(f"Failed to trigger update for feed {feed_id}, continuing with current data")
+
+            # 3. 获取该公众号的文章
+            articles = self.wewe_client.get_feed_articles(feed_id, limit=500)
+            run_stats['discovered'] = len(articles)
+            logger.info(f"Discovered {len(articles)} articles from feed {feed_id}")
+
+            # 4. 处理每篇文章
+            for article in articles:
+                try:
+                    result = self._process_article(article)
+                    if result == 'new':
+                        run_stats['new_articles'] += 1
+                    elif result == 'duplicate':
+                        run_stats['duplicates'] += 1
+
+                except Exception as e:
+                    logger.error(f"Error processing article {article.get('id', 'unknown')}: {e}")
+                    run_stats['errors'] += 1
+
+            # 5. 更新统计
+            run_stats['duration'] = time.time() - start_time
+
+            logger.info(f"Single feed discovery completed for {feed_id}: {run_stats['new_articles']} new, "
+                       f"{run_stats['duplicates']} duplicates, "
+                       f"{run_stats['errors']} errors in {run_stats['duration']:.2f}s")
+
+        except Exception as e:
+            logger.error(f"Single feed discovery failed for {feed_id}: {e}")
+            run_stats['errors'] += 1
+            run_stats['duration'] = time.time() - start_time
+
+        return run_stats
+
+    def get_feed_list(self) -> List[Dict]:
+        """获取所有公众号列表"""
+        try:
+            feeds = self.wewe_client.get_feed_list()
+            logger.info(f"Retrieved {len(feeds)} feeds from WeWe RSS")
+            return feeds
+        except Exception as e:
+            logger.error(f"Error getting feed list: {e}")
+            return []
+
+    def get_feed_info(self, feed_id: str) -> Optional[Dict]:
+        """获取单个公众号信息"""
+        try:
+            feed_info = self.wewe_client.get_feed_info(feed_id)
+            if feed_info:
+                logger.info(f"Retrieved info for feed {feed_id}: {feed_info.get('title', 'Unknown')}")
+            else:
+                logger.warning(f"Feed {feed_id} not found")
+            return feed_info
+        except Exception as e:
+            logger.error(f"Error getting feed info for {feed_id}: {e}")
+            return None
+
     def cleanup_old_data(self, days: int = 30) -> Dict:
         """清理旧数据"""
         try:
