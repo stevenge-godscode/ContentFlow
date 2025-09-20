@@ -72,6 +72,67 @@ def get_mysql_data_count():
     except Exception as e:
         return {'error': str(e)}
 
+def get_queue_stats():
+    """获取队列统计信息"""
+    try:
+        # 获取Redis队列长度
+        queues = {}
+
+        # 下载队列
+        result = subprocess.run([
+            'docker', 'exec', 'redis', 'redis-cli', 'llen', 'download_queue'
+        ], capture_output=True, text=True, timeout=5)
+        if result.returncode == 0:
+            queues['download_pending'] = result.stdout.strip()
+
+        # 提取队列
+        result = subprocess.run([
+            'docker', 'exec', 'redis', 'redis-cli', 'llen', 'extraction_queue'
+        ], capture_output=True, text=True, timeout=5)
+        if result.returncode == 0:
+            queues['extraction_pending'] = result.stdout.strip()
+
+        # 获取PostgreSQL处理统计
+        result = subprocess.run([
+            'docker', 'exec', 'postgres', 'psql', '-U', 'user', '-d', 'content_db', '-t', '-c',
+            "SELECT COUNT(*) FROM download_jobs WHERE status = 'pending';"
+        ], capture_output=True, text=True, timeout=5)
+        if result.returncode == 0:
+            queues['download_jobs_pending'] = result.stdout.strip()
+
+        result = subprocess.run([
+            'docker', 'exec', 'postgres', 'psql', '-U', 'user', '-d', 'content_db', '-t', '-c',
+            "SELECT COUNT(*) FROM download_jobs WHERE status = 'processing';"
+        ], capture_output=True, text=True, timeout=5)
+        if result.returncode == 0:
+            queues['download_jobs_processing'] = result.stdout.strip()
+
+        result = subprocess.run([
+            'docker', 'exec', 'postgres', 'psql', '-U', 'user', '-d', 'content_db', '-t', '-c',
+            "SELECT COUNT(*) FROM download_jobs WHERE status = 'completed';"
+        ], capture_output=True, text=True, timeout=5)
+        if result.returncode == 0:
+            queues['download_jobs_completed'] = result.stdout.strip()
+
+        return queues
+    except Exception as e:
+        return {'error': str(e)}
+
+def get_processing_stats():
+    """获取实时处理统计"""
+    try:
+        # 检查最近的处理活动
+        result = subprocess.run([
+            'docker', 'exec', 'postgres', 'psql', '-U', 'user', '-d', 'content_db', '-t', '-c',
+            "SELECT COUNT(*) FROM download_jobs WHERE updated_at > NOW() - INTERVAL '1 hour';"
+        ], capture_output=True, text=True, timeout=5)
+
+        recent_activity = result.stdout.strip() if result.returncode == 0 else '0'
+
+        return {'recent_hour_activity': recent_activity}
+    except Exception as e:
+        return {'error': str(e)}
+
 def print_header():
     """打印标题"""
     print("=" * 80)
@@ -105,6 +166,48 @@ def print_data_section():
     else:
         print(f"👥 WeWe RSS 账号: {data.get('accounts', 'N/A')}")
         print(f"📄 WeWe RSS 文章: {data.get('articles', 'N/A')}")
+
+def print_queue_section():
+    """打印队列和处理状态"""
+    print(f"\n🔄 队列和处理状态")
+    print("-" * 50)
+
+    queues = get_queue_stats()
+    processing = get_processing_stats()
+
+    if 'error' in queues:
+        print(f"⚠️  无法获取队列状态: {queues['error']}")
+    else:
+        print("📥 待处理队列:")
+        download_pending = queues.get('download_pending', 'N/A')
+        extraction_pending = queues.get('extraction_pending', 'N/A')
+        print(f"   • 待下载: {download_pending} 篇文章")
+        print(f"   • 待提取: {extraction_pending} 篇文章")
+
+        print("\n📋 任务状态:")
+        jobs_pending = queues.get('download_jobs_pending', 'N/A')
+        jobs_processing = queues.get('download_jobs_processing', 'N/A')
+        jobs_completed = queues.get('download_jobs_completed', 'N/A')
+        print(f"   • 等待处理: {jobs_pending} 个任务")
+        print(f"   • 正在处理: {jobs_processing} 个任务")
+        print(f"   • 已完成: {jobs_completed} 个任务")
+
+        print("\n⚡ 近期活动:")
+        recent_activity = processing.get('recent_hour_activity', 'N/A')
+        print(f"   • 最近1小时: {recent_activity} 个任务更新")
+
+        # 状态总结 - 安全处理N/A值
+        def safe_int(value):
+            try:
+                return int(value) if value and value != 'N/A' else 0
+            except (ValueError, TypeError):
+                return 0
+
+        total_pending = safe_int(download_pending) + safe_int(extraction_pending) + safe_int(jobs_pending)
+        if total_pending == 0:
+            print("\n✅ 所有队列空闲，系统待命中")
+        else:
+            print(f"\n⚙️  系统繁忙: {total_pending} 个待处理项目")
 
 def print_network_section():
     """打印网络配置"""
@@ -163,6 +266,7 @@ def main():
     # 打印各部分
     print_service_section("Docker容器状态", services_info)
     print_data_section()
+    print_queue_section()
     print_network_section()
     print_management_section()
 
